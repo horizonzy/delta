@@ -21,8 +21,10 @@ import static java.util.Objects.requireNonNull;
 
 import io.delta.kernel.types.DataType;
 import io.delta.kernel.types.StringType;
+import io.delta.kernel.types.VariantType;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Optional;
 
 /** {@link io.delta.kernel.data.ColumnVector} implementation for binary type data. */
@@ -65,6 +67,15 @@ public class DefaultBinaryVector extends AbstractColumnVector {
    */
   @Override
   public String getString(int rowId) {
+    if (getDataType() instanceof VariantType) {
+      checkValidRowId(rowId);
+      byte[] value = values[rowId];
+      if (value == null) {
+        return null;
+      }
+      return Base64.getEncoder().encodeToString(value);
+    }
+
     if (!(getDataType() instanceof StringType)) {
       throw unsupportedDataAccessException("string");
     }

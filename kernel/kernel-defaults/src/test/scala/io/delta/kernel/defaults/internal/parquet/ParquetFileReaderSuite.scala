@@ -16,6 +16,7 @@
 package io.delta.kernel.defaults.internal.parquet
 
 import java.math.BigDecimal
+import java.util.Base64
 import java.util.TimeZone
 
 import io.delta.golden.GoldenTableUtils.{goldenTableFile, goldenTablePath}
@@ -92,6 +93,24 @@ class ParquetFileReaderSuite extends AnyFunSuite
         readParquetFilesUsingKernel(allTypesFile, readSchema), /* actual */
         readParquetFilesUsingSpark(allTypesFile, readSchema) /* expected */ )
     }
+  }
+
+  test("read variant as a binary-like column") {
+    val inputLocation = getTestResourceFilePath("spark-variant-checkpoint")
+    val readSchema = new StructType().add("v", VariantType.VARIANT)
+
+    val batches = readParquetUsingKernelAsColumnarBatches(inputLocation, readSchema)
+    assert(batches.nonEmpty)
+
+    val variantVector = batches.head.getColumnVector(0)
+    assert(variantVector.getDataType == VariantType.VARIANT)
+
+    val nonNullRowId =
+      (0 until batches.head.getSize).find(rowId => !variantVector.isNullAt(rowId)).get
+    val rawBytes = variantVector.getBinary(nonNullRowId)
+
+    assert(rawBytes.nonEmpty)
+    assert(variantVector.getString(nonNullRowId) == Base64.getEncoder.encodeToString(rawBytes))
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////

@@ -30,7 +30,8 @@ public abstract class DataType {
   public static boolean isTypeValueBinaryLike(DataType type) {
     return type instanceof BinaryType
         || type instanceof GeometryType
-        || type instanceof GeographyType;
+        || type instanceof GeographyType
+        || type instanceof VariantType;
   }
 
   /**

@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -200,6 +201,13 @@ public abstract class BaseTableReader {
             return new String(row.getBinary(columnOrdinal));
         } else if (dataType instanceof DecimalType) {
             return row.getDecimal(columnOrdinal).toString();
+        } else if (dataType instanceof VariantType) {
+            try {
+                return row.getString(columnOrdinal);
+            } catch (UnsupportedOperationException e) {
+                byte[] rawBytes = row.getBinary(columnOrdinal);
+                return rawBytes == null ? null : Base64.getEncoder().encodeToString(rawBytes);
+            }
         } else if (dataType instanceof StructType) {
             return "TODO: struct value";
         } else if (dataType instanceof ArrayType) {
@@ -211,4 +219,3 @@ public abstract class BaseTableReader {
         }
     }
 }
-

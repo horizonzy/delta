@@ -19,6 +19,7 @@ import static io.delta.kernel.defaults.internal.parquet.TimestampConverters.crea
 import static io.delta.kernel.internal.util.Preconditions.checkArgument;
 
 import io.delta.kernel.data.ColumnVector;
+import io.delta.kernel.data.ColumnarBatch;
 import io.delta.kernel.defaults.internal.data.vector.*;
 import io.delta.kernel.types.*;
 import java.util.Arrays;
@@ -26,6 +27,7 @@ import java.util.Objects;
 import java.util.Optional;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.Converter;
+import org.apache.parquet.io.api.GroupConverter;
 import org.apache.parquet.io.api.PrimitiveConverter;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.Type;
@@ -41,6 +43,9 @@ class ParquetColumnReaders {
       checkArgument(typeFromFile instanceof GroupType, "cannot be cast to GroupType");
       return new RowColumnReader(
           initialBatchSize, (StructType) typeFromClient, (GroupType) typeFromFile);
+    } else if (typeFromClient instanceof VariantType) {
+      checkArgument(typeFromFile instanceof GroupType, "cannot be cast to GroupType");
+      return new VariantColumnReader(initialBatchSize, (GroupType) typeFromFile);
     } else if (typeFromClient instanceof ArrayType) {
       checkArgument(typeFromFile instanceof GroupType, "cannot be cast to GroupType");
       return new ArrayColumnReader(
@@ -478,6 +483,79 @@ class ParquetColumnReaders {
         this.nullability = Arrays.copyOf(this.nullability, newSize);
         setNullabilityToTrue(this.nullability, newSize / 2, newSize);
       }
+    }
+  }
+
+  public static class VariantColumnReader extends GroupConverter implements BaseColumnReader {
+    private final RowColumnReader physicalStructReader;
+
+    VariantColumnReader(int initialBatchSize, GroupType typeFromFile) {
+      this.physicalStructReader =
+          new RowColumnReader(
+              initialBatchSize,
+              new StructType()
+                  .add("value", BinaryType.BINARY, true)
+                  .add("metadata", BinaryType.BINARY, true),
+              typeFromFile);
+    }
+
+    @Override
+    public Converter getConverter(int fieldIndex) {
+      return physicalStructReader.getConverter(fieldIndex);
+    }
+
+    @Override
+    public void start() {
+      physicalStructReader.start();
+    }
+
+    @Override
+    public void end() {
+      physicalStructReader.end();
+    }
+
+    @Override
+    public ColumnVector getDataColumnVector(int batchSize) {
+      ColumnarBatch batch = physicalStructReader.getDataAsColumnarBatch(batchSize);
+      ColumnVector valueVector = batch.getColumnVector(0);
+      ColumnVector metadataVector = batch.getColumnVector(1);
+      byte[][] values = new byte[batchSize][];
+
+      for (int i = 0; i < batchSize; i++) {
+        if (metadataVector.isNullAt(i) || valueVector.isNullAt(i)) {
+          values[i] = null;
+          continue;
+        }
+
+        // Keep the raw binary representation so callers can at least inspect or print the value.
+        byte[] metadata = metadataVector.getBinary(i);
+        byte[] value = valueVector.getBinary(i);
+        values[i] = concat(metadata, value);
+      }
+
+      return new DefaultBinaryVector(VariantType.VARIANT, batchSize, values);
+    }
+
+    @Override
+    public void finalizeCurrentRow(long currentRowIndex) {
+      physicalStructReader.finalizeCurrentRow(currentRowIndex);
+    }
+
+    @Override
+    public void resizeIfNeeded() {
+      physicalStructReader.resizeIfNeeded();
+    }
+
+    @Override
+    public void resetWorkingState() {
+      physicalStructReader.resetWorkingState();
+    }
+
+    private static byte[] concat(byte[] left, byte[] right) {
+      byte[] out = new byte[left.length + right.length];
+      System.arraycopy(left, 0, out, 0, left.length);
+      System.arraycopy(right, 0, out, left.length, right.length);
+      return out;
     }
   }
 
